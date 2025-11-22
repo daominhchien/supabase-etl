@@ -8,6 +8,7 @@ ETL pipeline with Supabase + VNStock (REST API version for GitHub Actions)
 """
 
 import os
+import json          # 👈 THÊM DÒNG NÀY
 import pandas as pd
 from vnstock import Vnstock
 from supabase import create_client, Client
@@ -21,8 +22,13 @@ SUPABASE_URL = "https://fxjrsxepzrbpmqygfvee.supabase.co"
 # nếu không thì fallback về giá trị bạn hard-code cho chạy local.
 SUPABASE_SERVICE_KEY = os.getenv(
     "SUPABASE_SERVICE_KEY",
-    "sb_secret_qzMFzF85u7PxwvJmTVHooQ_Q9Tj7Zf9"
+    "sb_secret_xxx_thay_bang_service_role_key_cua_ban"
 )
+
+# 👇 HÀM MỚI: convert DataFrame -> list[dict] UTF-8 safe
+def df_to_utf8_dict(df):
+    # dùng to_json(force_ascii=False) rồi parse lại thành Python object
+    return json.loads(df.to_json(orient="records", force_ascii=False))
 
 # ====== HÀM CHÍNH ======
 def run_etl():
@@ -61,10 +67,12 @@ def run_etl():
 
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-    # Chuyển DataFrame -> list[dict]
-    income_data = income_df.to_dict(orient="records")
-    balance_data = balance_df.to_dict(orient="records")
-    cashflow_data = cashflow_df.to_dict(orient="records")
+    # ❌ ĐỪNG DÙNG .to_dict() nữa
+    # income_data = income_df.to_dict(orient="records")
+    # ✅ THAY BẰNG:
+    income_data = df_to_utf8_dict(income_df)
+    balance_data = df_to_utf8_dict(balance_df)
+    cashflow_data = df_to_utf8_dict(cashflow_df)
 
     # Lưu ý:
     # - Bảng trong Supabase phải tồn tại sẵn:
@@ -90,7 +98,11 @@ def run_etl():
 
     for local, remote in files:
         with open(local, "rb") as f:
-            res = supabase.storage.from_("processed-data").upload(remote, f)
+            # nếu file đã tồn tại thì dùng update, nếu lỗi thì fallback upload
+            try:
+                res = supabase.storage.from_("processed-data").update(remote, f)
+            except Exception:
+                res = supabase.storage.from_("processed-data").upload(remote, f)
             print(f"Uploaded {local}:", res)
 
     print("✅ ETL hoàn tất!")
