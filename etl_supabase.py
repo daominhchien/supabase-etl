@@ -319,17 +319,16 @@ def run_etl():
     print("➡ Income Statement sample:")
     print(income_df.head())
     print(f"\nColumns ({len(income_df.columns)}): {income_df.columns.tolist()}")
-    
-    # Generate SQL statements for table creation
-    print("\n" + "="*80)
-    print("📋 SQL CREATE TABLE STATEMENTS:")
-    print("="*80)
-    print(generate_create_table_sql(income_df, "fpt_income_statement"))
-    print(generate_create_table_sql(balance_df, "fpt_balance_sheet"))
-    print(generate_create_table_sql(cashflow_df, "fpt_cash_flow"))
-    print("="*80 + "\n")
 
-    # 2) TRANSFORM
+    # 2) AUTO CREATE TABLES nếu chưa tồn tại
+    print("\n🔹 Auto-create tables nếu chưa tồn tại...")
+    create_table_if_not_exists(income_df, "fpt_income_statement")
+    create_table_if_not_exists(balance_df, "fpt_balance_sheet")
+    create_table_if_not_exists(cashflow_df, "fpt_cash_flow")
+    
+    print("\n✅ Tables ready!")
+
+    # 3) TRANSFORM
     print("\n🔹 Transform: chuẩn hóa dữ liệu...")
     
     # Rename columns để match DB schema
