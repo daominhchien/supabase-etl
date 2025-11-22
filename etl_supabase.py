@@ -91,9 +91,10 @@ def upload_to_storage(local_path: str, remote_path: str, bucket: str = "processe
 def run_etl():
     # 1) EXTRACT
     print("🔹 Extract: dùng VNStock để lấy báo cáo tài chính FPT...")
-
-    stock = Vnstock(symbol="FPT", source="VCI")
-
+    
+    # ĐÚNG CHUẨN vnstock 3.x
+    stock = Vnstock().stock(symbol="FPT", source="VCI")
+    
     income_df = stock.finance.income_statement(period="year", lang="vi", dropna=True)
     balance_df = stock.finance.balance_sheet(period="year", lang="vi", dropna=True)
     cashflow_df = stock.finance.cash_flow(period="year", dropna=True)
