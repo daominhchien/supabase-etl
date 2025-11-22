@@ -259,7 +259,7 @@ def upload_to_storage(local_path: str, remote_path: str, bucket: str = "processe
 
 
 def create_table_if_not_exists(df: pd.DataFrame, table_name: str):
-    """Tự động tạo bảng trên Supabase nếu chưa tồn tại."""
+    """Print SQL tạo bảng với tất cả cột."""
     # Rename columns
     df = df.copy()
     if "CP" in df.columns:
@@ -267,16 +267,17 @@ def create_table_if_not_exists(df: pd.DataFrame, table_name: str):
     if "Năm" in df.columns:
         df.rename(columns={"Năm": "year"}, inplace=True)
     
-    sql = f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
+    sql = f"DROP TABLE IF EXISTS {table_name};\n\n"
+    sql += f"CREATE TABLE {table_name} (\n"
     sql += "  id bigserial primary key,\n"
     
     for col in df.columns:
-        # Determine type based on first non-null value
+        # Determine column type
         dtype = "numeric"  # Default for financial data
         if col in ["ticker"]:
             dtype = "text"
         elif col in ["year"]:
-            dtype = "int"
+            dtype = "integer"
         
         # Escape column names với quotes
         col_escaped = f'"{col}"' if col not in ["id", "ticker", "year"] else col
@@ -285,28 +286,31 @@ def create_table_if_not_exists(df: pd.DataFrame, table_name: str):
     sql += "  created_at timestamp default now()\n"
     sql += ");\n"
     
-    # Execute SQL qua REST API
-    url = f"{REST_BASE_URL}/rest/v1/rpc/exec_sql"
-    headers = {
-        **COMMON_HEADERS,
-        "Content-Type": "application/json",
-    }
+    print(sql)
+
+
+def print_drop_tables_sql():
+    """Print lệnh DROP TABLE."""
+    print("\n" + "="*80)
+    print("⬇️  COPY PASTE VÀO SUPABASE SQL EDITOR ĐỂ XÓA BẢNG:")
+    print("="*80 + "\n")
     
-    payload = {"query": sql}
+    sql = """DROP TABLE IF EXISTS fpt_income_statement CASCADE;
+DROP TABLE IF EXISTS fpt_balance_sheet CASCADE;
+DROP TABLE IF EXISTS fpt_cash_flow CASCADE;"""
     
-    try:
-        resp = requests.post(url, headers=headers, json=payload)
-        if resp.ok:
-            print(f"✅ Bảng {table_name} đã sẵn sàng")
-        else:
-            # Nếu endpoint không tồn tại, thử cách khác: exec via postgrest
-            print(f"⚠️  Không thể auto-create bảng {table_name}, vui lòng tạo manual hoặc kiểm tra bảng tồn tại")
-            print(f"SQL: {sql}")
-    except Exception as e:
-        print(f"⚠️  Lỗi khi tạo bảng {table_name}: {e}")
+    print(sql)
+    print("\n" + "="*80)
+    print("✅ Sau khi chạy xong SQL trên, nhấn Enter để tiếp tục...")
+    print("="*80 + "\n")
+    input()
 
 
 def run_etl():
+    # 0) PRINT DROP SQL
+    print("🔹 Step 1: XÓA BẢNG CŨ")
+    print_drop_tables_sql()
+    
     # 1) EXTRACT
     print("🔹 Extract: dùng VNStock để lấy báo cáo tài chính FPT...")
     
@@ -321,15 +325,24 @@ def run_etl():
     print(f"\nColumns ({len(income_df.columns)}): {income_df.columns.tolist()}")
 
     # 2) AUTO CREATE TABLES nếu chưa tồn tại
-    print("\n🔹 Auto-create tables nếu chưa tồn tại...")
+    print("\n🔹 Step 2: TẠO BẢNG MỚI")
+    print("\n" + "="*80)
+    print("⬇️  COPY PASTE VÀO SUPABASE SQL EDITOR:")
+    print("="*80 + "\n")
+    
     create_table_if_not_exists(income_df, "fpt_income_statement")
     create_table_if_not_exists(balance_df, "fpt_balance_sheet")
     create_table_if_not_exists(cashflow_df, "fpt_cash_flow")
     
-    print("\n✅ Tables ready!")
+    print("="*80)
+    print("✅ Sau khi chạy xong SQL trên, nhấn Enter để tiếp tục...")
+    print("="*80 + "\n")
+    input()
+    
+    print("✅ Tables ready!")
 
     # 3) TRANSFORM
-    print("\n🔹 Transform: chuẩn hóa dữ liệu...")
+    print("\n🔹 Step 3: Transform: chuẩn hóa dữ liệu...")
     
     # Rename columns để match DB schema
     income_df = income_df.copy()
@@ -343,9 +356,9 @@ def run_etl():
             df.rename(columns={"Năm": "year"}, inplace=True)
     
     print(f"✅ Renamed columns")
-    print(f"📊 Income shape: {income_df.shape}")
-    print(f"📊 Balance shape: {balance_df.shape}")
-    print(f"📊 Cashflow shape: {cashflow_df.shape}")
+    print(f"📊 Income: {income_df.shape[0]} rows × {income_df.shape[1]} cols")
+    print(f"📊 Balance: {balance_df.shape[0]} rows × {balance_df.shape[1]} cols")
+    print(f"📊 Cashflow: {cashflow_df.shape[0]} rows × {cashflow_df.shape[1]} cols")
 
     # Lưu CSV (original format)
     income_df.to_csv("income_statement.csv", index=False)
@@ -353,16 +366,16 @@ def run_etl():
     cashflow_df.to_csv("cash_flow.csv", index=False)
     print("✅ Đã lưu 3 file CSV.")
 
-    # 3) LOAD → Supabase qua REST API
-    print("\n🔹 Load vào Supabase...")
+    # 4) LOAD → Supabase qua REST API
+    print("\n🔹 Step 4: Load vào Supabase...")
     upsert_table(income_df, "fpt_income_statement")
     upsert_table(balance_df, "fpt_balance_sheet")
     upsert_table(cashflow_df, "fpt_cash_flow")
 
     print("✅ Đã gửi dữ liệu lên 3 bảng qua REST API.")
 
-    # 4) UPLOAD CSV → STORAGE
-    print("\n🔹 Upload 3 file CSV lên bucket processed-data...")
+    # 5) UPLOAD CSV → STORAGE
+    print("\n🔹 Step 5: Upload 3 file CSV lên bucket processed-data...")
 
     upload_to_storage("income_statement.csv", "income_statement.csv")
     upload_to_storage("balance_sheet.csv", "balance_sheet.csv")
