@@ -1,12 +1,9 @@
 """
 ETL pipeline with Supabase REST API + VNStock:
 - Extract 3 báo cáo tài chính từ VNStock
-- Transform
-- Load vào Supabase PostgreSQL qua REST API:
-    + fpt_income_statement
-    + fpt_balance_sheet
-    + fpt_cash_flow
-- Upload file CSV lên bucket processed-data (Supabase Storage)
+- Transform (rename CP -> ticker)
+- Load vào Supabase PostgreSQL qua REST API
+- Upload file CSV lên bucket processed-data
 """
 
 import os
@@ -15,7 +12,6 @@ import pandas as pd
 import requests
 from vnstock import Vnstock
 
-# ==== CONFIG: BẮT BUỘC DÙNG ENV TRONG GITHUB ACTIONS ====
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tzwepclhllftfmoeimjd.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
@@ -33,7 +29,7 @@ COMMON_HEADERS = {
 JSON_HEADERS = {
     **COMMON_HEADERS,
     "Content-Type": "application/json",
-    "Prefer": "return=minimal"  # không cần trả data về cho nhẹ
+    "Prefer": "return=minimal"
 }
 
 
@@ -58,7 +54,7 @@ def upsert_table(df: pd.DataFrame, table_name: str, chunk_size: int = 300):
             print(resp.text)
             resp.raise_for_status()
         else:
-            print(f"✅ Đã upsert {len(chunk)} rows vào {table_name} (chunk {i}-{i+len(chunk)})")
+            print(f"✅ Đã upsert {len(chunk)} rows vào {table_name}")
 
 
 def upload_to_storage(local_path: str, remote_path: str, bucket: str = "processed-data"):
@@ -66,12 +62,8 @@ def upload_to_storage(local_path: str, remote_path: str, bucket: str = "processe
     url = f"{STORAGE_BASE_URL}/object/{bucket}/{remote_path}"
     params = {"upsert": "true"}
 
-    # đoán content-type đơn giản theo extension
     ext = os.path.splitext(local_path)[1].lower()
-    if ext == ".csv":
-        content_type = "text/csv"
-    else:
-        content_type = "application/octet-stream"
+    content_type = "text/csv" if ext == ".csv" else "application/octet-stream"
 
     headers = {
         **COMMON_HEADERS,
@@ -92,7 +84,6 @@ def run_etl():
     # 1) EXTRACT
     print("🔹 Extract: dùng VNStock để lấy báo cáo tài chính FPT...")
     
-    # ĐÚNG CHUẨN vnstock 3.x
     stock = Vnstock().stock(symbol="FPT", source="VCI")
     
     income_df = stock.finance.income_statement(period="year", lang="vi", dropna=True)
@@ -103,13 +94,19 @@ def run_etl():
     print(income_df.head())
 
     # 2) TRANSFORM
-    print("🔹 Transform: chuẩn hóa dữ liệu ...")
-
+    print("🔹 Transform: chuẩn hóa dữ liệu...")
+    
     for df in (income_df, balance_df, cashflow_df):
+        # Rename CP -> ticker nếu CP tồn tại
+        if "CP" in df.columns:
+            df.rename(columns={"CP": "ticker"}, inplace=True)
+        # Ensure ticker column exists
         if "ticker" not in df.columns:
             df["ticker"] = "FPT"
 
-    # Lưu CSV để up Storage
+    print("✅ Đã chuẩn hóa cột dữ liệu")
+
+    # Lưu CSV
     income_df.to_csv("income_statement.csv", index=False)
     balance_df.to_csv("balance_sheet.csv", index=False)
     cashflow_df.to_csv("cash_flow.csv", index=False)
@@ -123,7 +120,7 @@ def run_etl():
     print("✅ Đã gửi dữ liệu lên 3 bảng qua REST API.")
 
     # 4) UPLOAD CSV → STORAGE
-    print("🔹 Upload 3 file CSV lên bucket processed-data ...")
+    print("🔹 Upload 3 file CSV lên bucket processed-data...")
 
     upload_to_storage("income_statement.csv", "income_statement.csv")
     upload_to_storage("balance_sheet.csv", "balance_sheet.csv")
