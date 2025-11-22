@@ -1,9 +1,8 @@
 """
 ETL pipeline with Supabase REST API + VNStock:
 - Extract 3 báo cáo tài chính từ VNStock
-- Transform (rename CP -> ticker)
+- Transform: pack dữ liệu vào cột data (JSONB)
 - Load vào Supabase PostgreSQL qua REST API
-- Upload file CSV lên bucket processed-data
 """
 
 import os
@@ -33,15 +32,44 @@ JSON_HEADERS = {
 }
 
 
-def df_to_records(df: pd.DataFrame):
-    """Convert DataFrame -> list[dict] (NaN -> None để JSON được)."""
-    df_clean = df.where(pd.notnull(df), None)
-    return df_clean.to_dict(orient="records")
+def df_to_jsonb_records(df: pd.DataFrame):
+    """
+    Convert DataFrame to records with JSONB format.
+    Giả sử DataFrame có cột 'Năm' hoặc 'Year', các cột khác pack vào 'data'.
+    """
+    records = []
+    
+    # Tìm cột năm (Năm hoặc Year)
+    year_col = None
+    for col in df.columns:
+        if col.lower() in ['năm', 'year']:
+            year_col = col
+            break
+    
+    for _, row in df.iterrows():
+        year = int(row[year_col]) if year_col and pd.notna(row[year_col]) else None
+        
+        # Pack toàn bộ dữ liệu vào JSONB
+        data_dict = {}
+        for col in df.columns:
+            if col.lower() not in ['năm', 'year', 'cp', 'ticker']:
+                val = row[col]
+                data_dict[col] = None if pd.isna(val) else val
+        
+        ticker = row.get('CP') or row.get('ticker', 'FPT')
+        
+        record = {
+            "ticker": ticker,
+            "year": year,
+            "data": data_dict
+        }
+        records.append(record)
+    
+    return records
 
 
-def upsert_table(df: pd.DataFrame, table_name: str, chunk_size: int = 300):
+def upsert_table(records: list, table_name: str, chunk_size: int = 300):
     """Gửi dữ liệu lên Supabase REST API theo từng chunk."""
-    records = df_to_records(df)
     print(f"🔹 Upsert {len(records)} rows vào bảng {table_name} qua REST API...")
 
     url = f"{REST_BASE_URL}/{table_name}"
@@ -58,7 +86,7 @@ def upsert_table(df: pd.DataFrame, table_name: str, chunk_size: int = 300):
 
 
 def upload_to_storage(local_path: str, remote_path: str, bucket: str = "processed-data"):
-    """Upload file lên Supabase Storage qua REST API (upsert = true)."""
+    """Upload file lên Supabase Storage qua REST API."""
     url = f"{STORAGE_BASE_URL}/object/{bucket}/{remote_path}"
     params = {"upsert": "true"}
 
@@ -92,30 +120,31 @@ def run_etl():
 
     print("➡ Income Statement sample:")
     print(income_df.head())
+    print(f"Columns: {income_df.columns.tolist()}")
 
     # 2) TRANSFORM
     print("🔹 Transform: chuẩn hóa dữ liệu...")
     
-    for df in (income_df, balance_df, cashflow_df):
-        # Rename CP -> ticker nếu CP tồn tại
-        if "CP" in df.columns:
-            df.rename(columns={"CP": "ticker"}, inplace=True)
-        # Ensure ticker column exists
-        if "ticker" not in df.columns:
-            df["ticker"] = "FPT"
+    income_records = df_to_jsonb_records(income_df)
+    balance_records = df_to_jsonb_records(balance_df)
+    cashflow_records = df_to_jsonb_records(cashflow_df)
+    
+    print(f"✅ Converted {len(income_records)} income records")
+    print(f"✅ Converted {len(balance_records)} balance records")
+    print(f"✅ Converted {len(cashflow_records)} cashflow records")
+    
+    print(f"\n📋 Sample income record: {json.dumps(income_records[0], ensure_ascii=False, indent=2)}")
 
-    print("✅ Đã chuẩn hóa cột dữ liệu")
-
-    # Lưu CSV
+    # Lưu CSV (original format)
     income_df.to_csv("income_statement.csv", index=False)
     balance_df.to_csv("balance_sheet.csv", index=False)
     cashflow_df.to_csv("cash_flow.csv", index=False)
     print("✅ Đã lưu 3 file CSV.")
 
     # 3) LOAD → Supabase qua REST API
-    upsert_table(income_df, "fpt_income_statement")
-    upsert_table(balance_df, "fpt_balance_sheet")
-    upsert_table(cashflow_df, "fpt_cash_flow")
+    upsert_table(income_records, "fpt_income_statement")
+    upsert_table(balance_records, "fpt_balance_sheet")
+    upsert_table(cashflow_records, "fpt_cash_flow")
 
     print("✅ Đã gửi dữ liệu lên 3 bảng qua REST API.")
 
