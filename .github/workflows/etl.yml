@@ -1,27 +1,28 @@
-name: ETL Supabase
+name: ETL FPT to Supabase
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"   # chạy mỗi giờ
-  workflow_dispatch:       # cho phép tự bấm Run ETL
+    - cron: "0 1 * * *"  # chạy mỗi ngày 08:00 (UTC+7 ~ 1h)
 
 jobs:
-  run-etl:
+  etl:
     runs-on: ubuntu-latest
-
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}          # https://tzwepclhllftfmoeimjd.supabase.co
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-    - uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    - name: Install dependencies
-      run: |
-        pip install pandas sqlalchemy supabase psycopg2-binary vnstock unidecode
+      - name: Install deps
+        run: |
+          pip install vnstock requests pandas
 
-    - name: Run ETL
-      env:
-        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-      run: python etl_supabase.py
+      - name: Run ETL
+        run: |
+          python etl_supabase.py
