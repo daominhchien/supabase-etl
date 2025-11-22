@@ -1,41 +1,43 @@
 """
-ETL pipeline with Supabase + VNStock:
-- Extract 3 báo cáo tài chính từ VNStock
-- Transform (không lỗi)
-- Load vào Supabase: income_statement, balance_sheet, cash_flow
-- Upload file CSV lên bucket processed-data
+ETL pipeline with Supabase + VNStock (REST API version for GitHub Actions)
+
+- Extract: 3 báo cáo tài chính FPT từ VNStock
+- Transform: chuẩn hóa & lưu CSV
+- Load: upsert vào Supabase bằng REST API (supabase.table)
+- Upload: đẩy CSV lên Supabase Storage (bucket: processed-data)
 """
 
+import os
 import pandas as pd
-from sqlalchemy import create_engine
-from supabase import create_client, Client
 from vnstock import Vnstock
+from supabase import create_client, Client
 
-# ==== CONFIG: sửa 2 giá trị này ====
-DB_PASSWORD = "Chien-1207"                     # mật khẩu DB
-SUPABASE_SERVICE_KEY = "sb_secret_qzMFzF85u7PxwvJmTVHooQ_Q9Tj7Zf9"     # lấy tại Project Settings -> API
-# ===================================
+# ====== CONFIG ======
 
-DB_USER = "postgres"
-DB_HOST = "db.fxjrsxepzrbpmqygfvee.supabase.co"
-DB_NAME = "postgres"
-DB_PORT = 5432
-
+# URL project Supabase
 SUPABASE_URL = "https://fxjrsxepzrbpmqygfvee.supabase.co"
 
+# Lấy SERVICE KEY từ biến môi trường nếu có (GitHub Actions),
+# nếu không thì fallback về giá trị bạn hard-code cho chạy local.
+SUPABASE_SERVICE_KEY = os.getenv(
+    "SUPABASE_SERVICE_KEY",
+    "sb_secret_qzMFzF85u7PxwvJmTVHooQ_Q9Tj7Zf9"
+)
+
+# ====== HÀM CHÍNH ======
 def run_etl():
     print("🔹 Extract: dùng VNStock để lấy báo cáo tài chính FPT...")
 
-    stock = Vnstock().stock(symbol='FPT', source='VCI')
+    stock = Vnstock().stock(symbol="FPT", source="VCI")
 
     # 1) Income Statement (KQKD)
-    income_df = stock.finance.income_statement(period='year', lang='vi', dropna=True)
-    
+    income_df = stock.finance.income_statement(period="year", lang="vi", dropna=True)
+
     # 2) Balance Sheet (BCĐKT)
-    balance_df = stock.finance.balance_sheet(period='year', lang='vi', dropna=True)
-    
+    balance_df = stock.finance.balance_sheet(period="year", lang="vi", dropna=True)
+
     # 3) Cash Flow (LCTT)
-    cashflow_df = stock.finance.cash_flow(period='year', dropna=True)
+    cashflow_df = stock.finance.cash_flow(period="year", dropna=True)
 
     print("➡ Income Statement sample:")
     print(income_df.head())
@@ -44,34 +46,41 @@ def run_etl():
     print("🔹 Transform: chuẩn hóa dữ liệu ...")
 
     # Thêm cột ticker nếu thiếu
-    for df in [income_df, balance_df, cashflow_df]:
+    for df in (income_df, balance_df, cashflow_df):
         if "ticker" not in df.columns:
             df["ticker"] = "FPT"
 
-    # Lưu file CSV
+    # Lưu 3 file CSV
     income_df.to_csv("income_statement.csv", index=False)
     balance_df.to_csv("balance_sheet.csv", index=False)
     cashflow_df.to_csv("cash_flow.csv", index=False)
-
     print("Đã lưu 3 file CSV.")
 
-    # ====== LOAD vào Supabase PostgreSQL ======
-    print("🔹 Load: ghi dữ liệu vào Supabase ...")
-
-    engine = create_engine(
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    )
-
-    income_df.to_sql("fpt_income_statement", con=engine, if_exists="replace", index=False)
-    balance_df.to_sql("fpt_balance_sheet", con=engine, if_exists="replace", index=False)
-    cashflow_df.to_sql("fpt_cash_flow", con=engine, if_exists="replace", index=False)
-
-    print("Đã ghi 3 bảng vào Supabase PostgreSQL")
-
-    # ====== UPLOAD STORAGE ======
-    print("🔹 Upload 3 file CSV lên bucket processed-data ...")
+    # ====== LOAD: Supabase REST API qua supabase-py ======
+    print("🔹 Load: upsert dữ liệu vào Supabase qua REST API ...")
 
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+    # Chuyển DataFrame -> list[dict]
+    income_data = income_df.to_dict(orient="records")
+    balance_data = balance_df.to_dict(orient="records")
+    cashflow_data = cashflow_df.to_dict(orient="records")
+
+    # Lưu ý:
+    # - Bảng trong Supabase phải tồn tại sẵn:
+    #   fpt_income_statement, fpt_balance_sheet, fpt_cash_flow
+    # - Nên tạo PRIMARY KEY hoặc UNIQUE để upsert hoạt động đúng.
+    resp1 = supabase.table("fpt_income_statement").upsert(income_data).execute()
+    print("Upsert fpt_income_statement:", resp1)
+
+    resp2 = supabase.table("fpt_balance_sheet").upsert(balance_data).execute()
+    print("Upsert fpt_balance_sheet:", resp2)
+
+    resp3 = supabase.table("fpt_cash_flow").upsert(cashflow_data).execute()
+    print("Upsert fpt_cash_flow:", resp3)
+
+    # ====== UPLOAD CSV LÊN STORAGE ======
+    print("🔹 Upload 3 file CSV lên bucket processed-data ...")
 
     files = [
         ("income_statement.csv", "income_statement.csv"),
@@ -86,5 +95,6 @@ def run_etl():
 
     print("✅ ETL hoàn tất!")
 
+# ====== ENTRYPOINT ======
 if __name__ == "__main__":
     run_etl()
