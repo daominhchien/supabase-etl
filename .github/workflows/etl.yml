@@ -21,7 +21,7 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install vnstock requests pandas
+          pip install "vnstock>=3" requests pandas
 
       - name: Run ETL
         run: |
