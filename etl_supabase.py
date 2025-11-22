@@ -22,7 +22,7 @@ SUPABASE_URL = "https://fxjrsxepzrbpmqygfvee.supabase.co"
 # nếu không thì fallback về giá trị bạn hard-code cho chạy local.
 SUPABASE_SERVICE_KEY = os.getenv(
     "SUPABASE_SERVICE_KEY",
-    "sb_secret_xxx_thay_bang_service_role_key_cua_ban"
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4anJzeGVwenJicG1xeWdmdmVlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Mzc0NjQxMSwiZXhwIjoyMDc5MzIyNDExfQ.qgE3kuh3ntg0t_YZxoJ5dHWS6Y9eWGeJrl_miJVucQs"
 )
 
 # 👇 HÀM MỚI: convert DataFrame -> list[dict] UTF-8 safe
