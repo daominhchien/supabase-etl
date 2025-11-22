@@ -18,7 +18,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install pandas sqlalchemy supabase psycopg2-binary vnstock
+        pip install pandas sqlalchemy supabase psycopg2-binary vnstock unidecode
 
     - name: Run ETL
       env:
